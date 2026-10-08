@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:18.0-bookworm
+    environment:
+      POSTGRES_DB: atc_bot
+      POSTGRES_USER: atc_bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atc_bot -d atc_bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    build: .
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://atc_bot:${POSTGRES_PASSWORD}@postgres:5432/atc_bot?sslmode=disable
+      DATABASE_ALLOW_INSECURE_LOCAL: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+  bot:
+    build: .
+    command: ["run", "--config", "/etc/bot/config.yaml"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://atc_bot:${POSTGRES_PASSWORD}@postgres:5432/atc_bot?sslmode=disable
+      DATABASE_ALLOW_INSECURE_LOCAL: "true"
+      HEALTH_ADDRESS: 0.0.0.0:8080
+    volumes:
+      - ./config.yaml:/etc/bot/config.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    stop_grace_period: 35s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+volumes:
+  postgres_data:

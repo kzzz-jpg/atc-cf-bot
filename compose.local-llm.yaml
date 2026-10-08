@@ -1,0 +1,12 @@
+# Linux override for an LLM bound only to host localhost:11434.
+# docker compose -f compose.yaml -f compose.local-llm.yaml up --build -d
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"
+  bot:
+    network_mode: host
+    environment:
+      DATABASE_URL: postgres://atc_bot:${POSTGRES_PASSWORD}@127.0.0.1:55432/atc_bot?sslmode=disable
+      LLM_BASE_URL: http://localhost:11434/v1
+      HEALTH_ADDRESS: 127.0.0.1:8080

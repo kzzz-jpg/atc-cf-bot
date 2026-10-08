@@ -1,0 +1,42 @@
+llm:
+  base_url: https://api.openai.com/v1
+  model: "" # Required; no model is selected automatically.
+  translation_model: ""
+  hint_model: ""
+  solution_model: ""
+  request_timeout_seconds: 60
+  operation_timeout_seconds: 180
+  max_retries: 2
+  output_token_limit: 8192
+  token_limit_parameter: max_completion_tokens
+  allow_missing_finish_reason: false
+  max_concurrency: 2
+  max_queue_size: 20
+database:
+  max_connections: 10
+  query_timeout_seconds: 5
+  allow_insecure_local: false
+  lock_connection_mode: direct
+worker:
+  public_concurrency: 4
+  lease_seconds: 90
+  heartbeat_seconds: 15
+scheduler:
+  poll_seconds: 30
+discord:
+  test_guild_id: ""
+health_address: 127.0.0.1:8080
+limits:
+  catalog_bytes: 67108864
+  html_bytes: 5242880
+  image_bytes: 2097152
+  images_total_bytes: 8388608
+  image_pixels: 16000000
+  llm_response_bytes: 4194304
+  statement_bytes: 65536
+  translation_bytes: 16384
+  messages_per_problem: 64
+  waiters: 200
+  guild_waiters: 50
+  manual_guild_queue: 5
+  manual_global_queue: 100
