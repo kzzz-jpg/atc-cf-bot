@@ -1,0 +1,27 @@
+# Isolated VPS deployment; build/load the image before using --no-build.
+# Use scripts/vps-compose.sh so every command targets the same project.
+services:
+  postgres:
+    mem_limit: 384m
+    cpus: 0.5
+    logging: &bounded-logs
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  migrate:
+    image: atc-cf-bot:vps
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *bounded-logs
+  bot:
+    image: atc-cf-bot:vps
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      WORKER_PUBLIC_CONCURRENCY: "2"
+      LLM_MAX_CONCURRENCY: "1"
+    # Allows an explicitly selected host Ollama without host networking.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging: *bounded-logs
