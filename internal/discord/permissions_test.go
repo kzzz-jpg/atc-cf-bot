@@ -118,3 +118,34 @@ func TestForumChecksTagsAndCurrentBotPermissions(t *testing.T) {
 		})
 	}
 }
+
+func TestForumOwnerAndAdministratorHaveThreadPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		user        string
+		permissions int64
+	}{
+		{"owner", "999999999", 0},
+		{"administrator", testUser, discordgo.PermissionAdministrator},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forum := &discordgo.Channel{
+				ID: testForum, GuildID: testGuild, Type: discordgo.ChannelTypeGuildForum,
+				PermissionOverwrites: []*discordgo.PermissionOverwrite{
+					{ID: testGuild, Type: discordgo.PermissionOverwriteTypeRole, Deny: discordgo.PermissionViewChannel | discordgo.PermissionSendMessagesInThreads},
+					{ID: tc.user, Type: discordgo.PermissionOverwriteTypeMember, Deny: discordgo.PermissionAttachFiles},
+				},
+			}
+			a, _ := permissionAdapter(t, forum, func() []string { return []string{testRole} }, tc.permissions)
+			a.BotID = tc.user
+			cfg := domain.DefaultSettings()
+			cfg.ForumChannelID = testForum
+			if e := a.CheckForum(context.Background(), testGuild, cfg); e != nil {
+				t.Fatalf("forum permissions rejected %s: %v", tc.name, e)
+			}
+			if e := a.Authorize(context.Background(), testGuild, tc.user, testForum, true, nil); e != nil {
+				t.Fatalf("management permissions rejected %s: %v", tc.name, e)
+			}
+		})
+	}
+}

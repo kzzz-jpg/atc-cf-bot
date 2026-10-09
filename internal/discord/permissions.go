@@ -7,6 +7,10 @@ import (
 	"github.com/kzzz/atc-cf-bot/internal/domain"
 )
 
+// Owners and administrators have every permission, including newer flags
+// omitted from discordgo.PermissionAll, and bypass channel overwrites.
+const allPermissions int64 = (1 << 63) - 1
+
 // Permissions always fetches current roles/member/channel rather than trusting
 // an interaction's earlier permissions or an incomplete Gateway member cache.
 func (a *Adapter) Permissions(ctx context.Context, guild, user, channel string) (int64, []string, error) {
@@ -33,7 +37,7 @@ func (a *Adapter) Permissions(ctx context.Context, guild, user, channel string) 
 		return 0, nil, e
 	}
 	if g.OwnerID == user {
-		return discordgo.PermissionAll, member.Roles, nil
+		return allPermissions, member.Roles, nil
 	}
 	roleSet := map[string]bool{guild: true}
 	for _, r := range member.Roles {
@@ -46,7 +50,7 @@ func (a *Adapter) Permissions(ctx context.Context, guild, user, channel string) 
 		}
 	}
 	if p&discordgo.PermissionAdministrator != 0 {
-		return discordgo.PermissionAll, member.Roles, nil
+		return allPermissions, member.Roles, nil
 	}
 	for _, o := range ch.PermissionOverwrites {
 		if o.ID == guild {
