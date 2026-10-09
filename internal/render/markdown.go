@@ -49,6 +49,9 @@ func SplitMarkdown(text string, budget int, atoms []string) ([]string, error) {
 				suffix = "\n"
 			}
 			piece := mark + language + "\n" + part + suffix + mark
+			if strings.HasSuffix(rest[end[0]:end[1]], "\n") || len(parts) > 1 {
+				piece += "\n"
+			}
 			if Units(piece) > budget {
 				return nil, domain.Fail(domain.Unsupported)
 			}
@@ -56,7 +59,15 @@ func SplitMarkdown(text string, budget int, atoms []string) ([]string, error) {
 		}
 		text = rest[end[1]:]
 	}
-	return out, nil
+	var packed []string
+	for _, part := range out {
+		if len(packed) > 0 && Units(packed[len(packed)-1])+Units(part) <= budget {
+			packed[len(packed)-1] += part
+		} else {
+			packed = append(packed, part)
+		}
+	}
+	return packed, nil
 }
 func SplitTokens(text string, budget int, tokens []string) ([]string, error) {
 	return splitProtected(text, budget, tokens)

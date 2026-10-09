@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kzzz/atc-cf-bot/internal/domain"
@@ -10,7 +11,7 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-const Version = "discord-v1"
+const Version = "discord-v2"
 
 func Units(s string) int {
 	n := 0
@@ -111,10 +112,6 @@ func splitProtected(text string, budget int, atoms []string) ([]string, error) {
 		current.WriteString(piece)
 		units += n
 		text = text[len(piece):]
-		// Paragraph breaks are natural section boundaries without altering bytes.
-		if strings.HasSuffix(current.String(), "\n\n") && units > budget/2 {
-			flush()
-		}
 	}
 	flush()
 	return chunks, nil
@@ -172,12 +169,13 @@ func fence(s string) string {
 	}
 	return strings.Repeat("`", maxRun)
 }
-func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pubID, date, label string, maxMessages int) ([]Payload, error) {
+func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pubID, _, _ string, maxMessages int) ([]Payload, error) {
 	if e := t.Validate(s); e != nil {
 		return nil, e
 	}
 	var texts []string
-	info := fmt.Sprintf("**%s｜%s %s**\n%s\n原題：%s\n", label, ref.Platform, ref.ExternalID, s.Title, s.URL)
+	var protected []string
+	info := fmt.Sprintf("**%s｜%s %s**\n原題：%s\n", s.Title, ref.Platform, ref.ExternalID, s.URL)
 	if ref.Difficulty != nil {
 		origin := "Codeforces rating"
 		if ref.Platform == domain.AtCoder {
@@ -194,18 +192,12 @@ func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pu
 	info += "AI 翻譯，請以原站題目核對。\n"
 	texts = append(texts, info)
 	sampleTexts := func(i int, kind, text string) error {
-		parts, e := SampleParts(text, 1650)
-		if e != nil {
-			return e
+		f := fence(text)
+		newline := ""
+		if !strings.HasSuffix(text, "\n") {
+			newline = "\n"
 		}
-		for j, p := range parts {
-			f := fence(p)
-			suffix := ""
-			if len(parts) > 1 {
-				suffix = fmt.Sprintf("（連續片段 %d/%d；依序相接還原）", j+1, len(parts))
-			}
-			texts = append(texts, fmt.Sprintf("**範例 %d %s%s**\n%stext\n%s\n%s", i+1, kind, suffix, f, p, f))
-		}
+		texts = append(texts, fmt.Sprintf("**範例 %d %s**\n%stext\n%s%s%s", i+1, kind, f, text, newline, f))
 		return nil
 	}
 	orderedSamples := false
@@ -231,13 +223,8 @@ func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pu
 		if e != nil {
 			return nil, e
 		}
-		parts, e := SplitMarkdown(restored, 1700, atoms)
-		if e != nil {
-			return nil, e
-		}
-		for _, p := range parts {
-			texts = append(texts, p)
-		}
+		texts = append(texts, restored)
+		protected = append(protected, atoms...)
 	}
 	if !orderedSamples {
 		for i, sample := range s.Samples {
@@ -251,29 +238,34 @@ func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pu
 	}
 
 	var result []Payload
-	for _, text := range texts {
+	parts, e := SplitMarkdown(strings.Join(texts, "\n\n"), 2000, protected)
+	if e != nil {
+		return nil, e
+	}
+	for _, text := range parts {
 		result = append(result, NewPayload(text))
 	}
-	for i, a := range s.Assets {
+	for _, a := range s.Assets {
 		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif"}[a.MIME]
 		if ext == "" || len(a.Body) == 0 {
 			return nil, domain.Fail(domain.Unsupported)
 		}
 		name := "diagram-" + a.ID + ext
-		p := NewPayload(fmt.Sprintf("必要圖片 %d", i+1))
-		p.Attachments = []Attachment{{ID: "0", Filename: name, AssetID: a.ID}}
-		p.Embeds = []Embed{{Image: &Image{URL: "attachment://" + name}}}
-		result = append(result, p)
+		if len(result[len(result)-1].Attachments) == 10 {
+			result = append(result, NewPayload(""))
+		}
+		p := &result[len(result)-1]
+		p.Attachments = append(p.Attachments, Attachment{ID: strconv.Itoa(len(p.Attachments)), Filename: name, AssetID: a.ID})
+		p.Embeds = append(p.Embeds, Embed{Image: &Image{URL: "attachment://" + name}})
 	}
 	if len(result) == 0 || len(result) > maxMessages {
 		return nil, domain.Fail(domain.Unsupported)
 	}
 	for i := range result {
-		result[i].Content = fmt.Sprintf("【%s｜%s｜段落 %d/%d】\n", date, label, i+1, len(result)) + result[i].Content
 		if Units(result[i].Content) > 2000 {
 			return nil, domain.Fail(domain.Unsupported)
 		}
 	}
-	result[len(result)-1].Components = []Row{{Type: 1, Components: []Button{{Type: 2, Style: 5, Label: "前往題目", URL: s.URL}, {Type: 2, Style: 1, Label: "給我提示", CustomID: "v1:hint:" + pubID}, {Type: 2, Style: 2, Label: "給我解答", CustomID: "v1:solution:" + pubID}}}}
+	result[len(result)-1].Components = []Row{{Type: 1, Components: []Button{{Type: 2, Style: 5, Label: "前往題目", URL: s.URL}, {Type: 2, Style: 1, Label: "給我提示", CustomID: "v1:hint:" + pubID}, {Type: 2, Style: 2, Label: "給我題解", CustomID: "v1:solution:" + pubID}}}}
 	return result, nil
 }

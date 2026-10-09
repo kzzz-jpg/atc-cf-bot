@@ -110,3 +110,50 @@ func TestSamplesComeBeforeExplanation(t *testing.T) {
 		t.Fatal("sample transformed or reordered")
 	}
 }
+
+func TestShortProblemCombinesSectionsAndSamples(t *testing.T) {
+	s := domain.Statement{
+		Title: "加總", URL: "https://atcoder.jp/contests/abc001/tasks/a",
+		Blocks:  []domain.Block{{ID: "statement", Text: "計算兩數之和。"}, {ID: "input", Text: "輸入兩個整數。"}, {ID: "output", Text: "輸出總和。"}, {ID: "constraints", Text: "整數介於 1 和 100。"}},
+		Samples: []domain.Sample{{Input: "1 2\n", Output: "3\n"}, {Input: "4 5\n", Output: "9\n"}},
+	}
+	tr := domain.Translation{Blocks: map[string]string{}}
+	for _, b := range s.Blocks {
+		tr.Blocks[b.ID] = b.Text
+	}
+	payloads, e := Problem(s, tr, domain.ProblemRef{Platform: domain.AtCoder, ExternalID: "a"}, domain.NewID(), "2026-10-09", "加題 #1", 1)
+	if e != nil || len(payloads) != 1 {
+		t.Fatalf("short problem split: count=%d error=%v", len(payloads), e)
+	}
+	text := payloads[0].Content
+	for _, unwanted := range []string{"【", "段落", "加題 #1", "2026-10-09", "連續片段"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("unwanted segment label %q", unwanted)
+		}
+	}
+	for _, expected := range []string{"計算兩數之和。", "輸入兩個整數。", "輸出總和。", "整數介於 1 和 100。", "```text\n1 2\n```", "```text\n9\n```"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing original section/sample %q", expected)
+		}
+	}
+	if len(payloads[0].Components) != 1 || len(payloads[0].Components[0].Components) != 3 {
+		t.Fatal("missing final buttons")
+	}
+}
+
+func TestParagraphBreakDoesNotSplitFittingText(t *testing.T) {
+	text := strings.Repeat("中", 1200) + "\n\n" + strings.Repeat("文", 300)
+	parts, e := SplitMarkdown(text, 2000, nil)
+	if e != nil || len(parts) != 1 || parts[0] != text {
+		t.Fatal("fitting paragraphs split or changed", e, len(parts))
+	}
+}
+
+func TestImageSharesProblemMessage(t *testing.T) {
+	s := domain.Statement{Title: "圖形", URL: "https://atcoder.jp/a", Blocks: []domain.Block{{ID: "a", Text: "請看圖片。"}}, Samples: []domain.Sample{{Input: "1\n", Output: "2\n"}}, Assets: []domain.Asset{{ID: "diagram", MIME: "image/png", Body: []byte("image")}}}
+	tr := domain.Translation{Blocks: map[string]string{"a": "請看圖片。"}}
+	ps, e := Problem(s, tr, domain.ProblemRef{}, domain.NewID(), "2026-10-09", "題目 1", 1)
+	if e != nil || len(ps) != 1 || len(ps[0].Attachments) != 1 || len(ps[0].Embeds) != 1 {
+		t.Fatal("image unnecessarily used another message", e)
+	}
+}

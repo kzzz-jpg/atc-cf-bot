@@ -23,7 +23,11 @@ type Service struct {
 func (s *Service) Generate(ctx context.Context, guild, sid, kind, language string, statement domain.Statement) (json.RawMessage, string, error) {
 	system := prompts.Get(kind)
 	original := source.Readable(statement)
-	req := llm.Request{Kind: kind, Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: "程式語言：" + language + "\n完整原文：\n" + original}}}
+	user := "程式語言：" + language + "\n完整原文：\n" + original
+	if kind == "solution" {
+		user = "完整原文：\n" + original
+	}
+	req := llm.Request{Kind: kind, Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}}
 	fp := s.Client.Fingerprint(req, domain.JSONHash(statement), statement.ParserVersion, language)
 	fp["statement_id"] = sid
 	if kind == "translation" {
