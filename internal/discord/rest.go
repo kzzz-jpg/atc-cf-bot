@@ -308,14 +308,28 @@ func (a *Adapter) Defer(ctx context.Context, i *discordgo.Interaction) error {
 	return a.JSON(ctx, "POST", "/interactions/"+i.ID+"/"+i.Token+"/callback", "interaction:"+i.ID, map[string]any{"type": 5, "data": map[string]any{"flags": 64, "allowed_mentions": render.Mentions{Parse: []string{}}}}, nil, false)
 }
 func (a *Adapter) Reply(ctx context.Context, i *discordgo.Interaction, text string) error {
-	parts, e := render.SplitMarkdown(text, 1800, nil)
+	return a.reply(ctx, i, text, false)
+}
+func (a *Adapter) ReplySpoiler(ctx context.Context, i *discordgo.Interaction, text string) error {
+	return a.reply(ctx, i, text, true)
+}
+func (a *Adapter) reply(ctx context.Context, i *discordgo.Interaction, text string, spoiler bool) error {
+	var parts []string
+	var e error
+	flags := discordgo.MessageFlagsEphemeral
+	if spoiler {
+		parts, e = render.SplitSpoiler(text, 1800)
+		flags |= discordgo.MessageFlagsSuppressEmbeds
+	} else {
+		parts, e = render.SplitMarkdown(text, 1800, nil)
+	}
 	if e != nil || len(parts) > 20 {
-		return a.PrivateAttachment(ctx, i, text)
+		return a.privateAttachment(ctx, i, text, spoiler)
 	}
 	for n, p := range parts {
 		path := "/webhooks/" + i.AppID + "/" + i.Token
 		method := "POST"
-		payload := map[string]any{"content": p, "flags": 64, "allowed_mentions": render.Mentions{Parse: []string{}}}
+		payload := map[string]any{"content": p, "flags": flags, "allowed_mentions": render.Mentions{Parse: []string{}}}
 		if n == 0 {
 			path += "/messages/@original"
 			method = "PATCH"
@@ -327,13 +341,24 @@ func (a *Adapter) Reply(ctx context.Context, i *discordgo.Interaction, text stri
 	return nil
 }
 func (a *Adapter) PrivateAttachment(ctx context.Context, i *discordgo.Interaction, text string) error {
+	return a.privateAttachment(ctx, i, text, false)
+}
+func (a *Adapter) privateAttachment(ctx context.Context, i *discordgo.Interaction, text string, spoiler bool) error {
 	var data bytes.Buffer
 	mw := multipart.NewWriter(&data)
 	field, _ := mw.CreateFormField("payload_json")
-	payload := map[string]any{"content": "完整私人回覆請見附件（AI 產生）。", "flags": 64, "allowed_mentions": render.Mentions{Parse: []string{}}, "attachments": []any{map[string]any{"id": "0", "filename": "answer.txt"}}}
+	filename := "answer.txt"
+	content := "完整私人回覆請見附件（AI 產生）。"
+	flags := discordgo.MessageFlagsEphemeral
+	if spoiler {
+		filename = "SPOILER_" + filename
+		content = "||" + content + "||"
+		flags |= discordgo.MessageFlagsSuppressEmbeds
+	}
+	payload := map[string]any{"content": content, "flags": flags, "allowed_mentions": render.Mentions{Parse: []string{}}, "attachments": []any{map[string]any{"id": "0", "filename": filename}}}
 	raw, _ := json.Marshal(payload)
 	_, _ = field.Write(raw)
-	file, e := mw.CreateFormFile("files[0]", "answer.txt")
+	file, e := mw.CreateFormFile("files[0]", filename)
 	if e != nil {
 		return e
 	}

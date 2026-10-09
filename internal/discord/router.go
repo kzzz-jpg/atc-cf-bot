@@ -102,7 +102,11 @@ func (r *Router) Handle(i *discordgo.Interaction) {
 			cc()
 			return
 		}
-		_ = r.Adapter.Reply(ctx, i, text)
+		if e == nil && i.Type == discordgo.InteractionMessageComponent {
+			_ = r.Adapter.ReplySpoiler(ctx, i, text)
+		} else {
+			_ = r.Adapter.Reply(ctx, i, text)
+		}
 	}()
 }
 func safeError(e error) string {
