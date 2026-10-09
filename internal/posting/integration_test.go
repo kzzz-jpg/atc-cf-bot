@@ -28,10 +28,12 @@ type transport func(*http.Request) (*http.Response, error)
 func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type fakePublisher struct {
-	mu              sync.Mutex
-	sent            map[string]store.DiscordResult
-	calls           map[string]int
-	failAfterAccept bool
+	mu                sync.Mutex
+	sent              map[string]store.DiscordResult
+	calls             map[string]int
+	failAfterAccept   bool
+	failFinalOverview bool
+	failedOverviewID  string
 }
 
 func (*fakePublisher) CheckForum(context.Context, string, domain.Settings) error { return nil }
@@ -43,6 +45,11 @@ func (f *fakePublisher) Execute(_ context.Context, o store.Operation) (store.Dis
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[o.ID]++
+	if f.failFinalOverview && o.Kind == "overview" && strings.Contains(o.Payload.Content, "狀態：completed") {
+		f.failFinalOverview = false
+		f.failedOverviewID = o.ID
+		return store.DiscordResult{}, domain.Fail(domain.Conflict)
+	}
 	id := strconv.FormatInt(600000000000000000+int64(len(f.sent)), 10)
 	r := store.DiscordResult{ID: id}
 	if o.Kind == "forum" {
@@ -186,6 +193,20 @@ func TestPostgresEndToEndDailyManualAndRestart(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	pub.failFinalOverview = true
+	if e = service.Run(ctx, j); e == nil {
+		t.Fatal("final overview failure did not interrupt daily job")
+	}
+	if e = db.FinishJob(ctx, j, "blocked", "conflict", false); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Accept(ctx, store.AcceptRequest{GuildID: guild, AllowResume: true}); e != nil {
+		t.Fatal(e)
+	}
+	j, e = db.ClaimJob(ctx, domain.NewID())
+	if e != nil {
+		t.Fatal(e)
+	}
 	if e = service.Run(ctx, j); e != nil {
 		t.Fatal(e)
 	}
@@ -202,7 +223,14 @@ func TestPostgresEndToEndDailyManualAndRestart(t *testing.T) {
 		t.Fatalf("published count %d", count)
 	}
 	for id, calls := range pub.calls {
-		if calls != 1 {
+		expected := 1
+		if id == pub.failedOverviewID {
+			expected = 2
+			if _, ok := pub.sent[id]; !ok {
+				t.Fatal("completed problems prevented the overview retry")
+			}
+		}
+		if calls != expected {
 			t.Errorf("operation %s sent %d times", id, calls)
 		}
 	}

@@ -119,21 +119,29 @@ func (s *Service) Run(ctx context.Context, j store.JobLease) error {
 		if e = s.Store.RefreshDaily(ctx, j.GuildID, j.DailyID); e != nil {
 			return e
 		}
-		text, e := s.Store.OverviewText(ctx, j.GuildID, j.DailyID)
-		if e != nil {
-			return e
-		}
-		payload := render.NewPayload(text)
-		payload.ChannelID = d.ThreadID
-		overview, e := s.Store.PrepareOverview(ctx, j, payload, d.StarterID)
-		if e != nil {
-			return e
-		}
-		if e = s.execute(ctx, j, d, overview); e != nil {
+		if e = s.updateOverview(ctx, j, d); e != nil {
 			return e
 		}
 	}
-	return s.Store.RefreshDaily(ctx, j.GuildID, j.DailyID)
+	if e = s.Store.RefreshDaily(ctx, j.GuildID, j.DailyID); e != nil {
+		return e
+	}
+	// A resumed job can have completed all problems before its last overview
+	// failed. Finish that durable operation even when no problem needs sending.
+	return s.updateOverview(ctx, j, d)
+}
+func (s *Service) updateOverview(ctx context.Context, j store.JobLease, d store.Daily) error {
+	text, e := s.Store.OverviewText(ctx, j.GuildID, j.DailyID)
+	if e != nil {
+		return e
+	}
+	payload := render.NewPayload(text)
+	payload.ChannelID = d.ThreadID
+	overview, e := s.Store.PrepareOverview(ctx, j, payload, d.StarterID)
+	if e != nil {
+		return e
+	}
+	return s.execute(ctx, j, d, overview)
 }
 func (s *Service) validate(ctx context.Context, j store.JobLease, d store.Daily) error {
 	if e := s.Store.CheckLease(ctx, j); e != nil {

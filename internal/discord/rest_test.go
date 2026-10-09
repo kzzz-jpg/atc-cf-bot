@@ -10,10 +10,61 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/kzzz/atc-cf-bot/internal/domain"
 	"github.com/kzzz/atc-cf-bot/internal/render"
 	"github.com/kzzz/atc-cf-bot/internal/store"
 )
+
+func TestOverviewUpdateAcceptsRemovedTrailingNewline(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		ok      bool
+	}{
+		{"unchanged", "previous", true},
+		{"edited", "someone changed the overview", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var edits atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					_ = json.NewEncoder(w).Encode(discordgo.Message{ID: "123456789", Content: tc.content, Author: &discordgo.User{ID: "987654321"}})
+					return
+				}
+				if r.Method != http.MethodPatch {
+					t.Errorf("unexpected method %s", r.Method)
+				}
+				edits.Add(1)
+				_, _ = w.Write([]byte(`{"id":"123456789"}`))
+			}))
+			defer server.Close()
+			a, _ := New("secret", nil)
+			a.BaseURL = server.URL
+			a.BotID = "987654321"
+			payload := render.NewPayload("completed")
+			payload.ChannelID = "555555555"
+			_, e := a.Execute(context.Background(), store.Operation{Kind: "overview", DiscordID: "123456789", BeforeHash: domain.Hash([]byte("previous\n")), Payload: payload})
+			if (e == nil) != tc.ok || (edits.Load() == 1) != tc.ok {
+				t.Fatalf("error=%v edits=%d", e, edits.Load())
+			}
+		})
+	}
+}
+
+func TestHistoricalOverviewMatchesRemovedTrailingNewline(t *testing.T) {
+	a, _ := New("secret", nil)
+	a.BotID = "987654321"
+	m := &discordgo.Message{ID: "123456789", Content: "completed", Author: &discordgo.User{ID: a.BotID}}
+	o := store.Operation{Kind: "overview", Payload: render.NewPayload("completed\n")}
+	if !a.Match(context.Background(), m, o) {
+		t.Fatal("historical overview did not match normalized content")
+	}
+	o.Kind = "message"
+	if a.Match(context.Background(), m, o) {
+		t.Fatal("problem message matching was relaxed")
+	}
+}
 
 func TestPublicCreateHasNoHiddenRetry(t *testing.T) {
 	for _, status := range []int{500, 429, 403} {

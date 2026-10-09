@@ -199,7 +199,9 @@ func (a *Adapter) Execute(ctx context.Context, o store.Operation) (store.Discord
 		if a.Match(ctx, m, o) {
 			return store.DiscordResult{ID: m.ID}, nil
 		}
-		if domain.Hash([]byte(m.Content)) != o.BeforeHash {
+		// Older saved overviews ended with a newline that Discord removes.
+		// Verify that exact historical content too before updating it.
+		if domain.Hash([]byte(m.Content)) != o.BeforeHash && domain.Hash([]byte(m.Content+"\n")) != o.BeforeHash {
 			return store.DiscordResult{}, domain.Fail(domain.Conflict)
 		}
 	}

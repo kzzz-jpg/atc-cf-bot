@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -254,5 +255,5 @@ func (s *Store) OverviewText(ctx context.Context, guild, daily string) (string, 
 			text += line + "\n"
 		}
 	}
-	return text, rows.Err()
+	return strings.TrimSuffix(text, "\n"), rows.Err()
 }

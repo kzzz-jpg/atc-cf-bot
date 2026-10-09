@@ -13,7 +13,10 @@ import (
 )
 
 func (a *Adapter) Match(ctx context.Context, m *discordgo.Message, o store.Operation) bool {
-	if m == nil || m.Author == nil || m.Author.ID != a.BotID || m.Content != o.Payload.Content || len(m.Attachments) != len(o.Payload.Attachments) || len(m.Components) != len(o.Payload.Components) || len(m.Embeds) != len(o.Payload.Embeds) {
+	if m == nil || m.Author == nil || m.Author.ID != a.BotID || len(m.Attachments) != len(o.Payload.Attachments) || len(m.Components) != len(o.Payload.Components) || len(m.Embeds) != len(o.Payload.Embeds) {
+		return false
+	}
+	if m.Content != o.Payload.Content && !(o.Kind == "overview" && m.Content == strings.TrimSuffix(o.Payload.Content, "\n")) {
 		return false
 	}
 	for i, row := range o.Payload.Components {
