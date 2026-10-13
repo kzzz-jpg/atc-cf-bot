@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kzzz/atc-cf-bot/internal/domain"
@@ -54,6 +55,7 @@ func (s Syncer) cf(ctx context.Context) (domain.CatalogSnapshot, error) {
 		Status string `json:"status"`
 		Result []struct {
 			ID       int    `json:"id"`
+			Name     string `json:"name"`
 			Phase    string `json:"phase"`
 			Start    *int64 `json:"startTimeSeconds"`
 			Duration *int64 `json:"durationSeconds"`
@@ -68,7 +70,7 @@ func (s Syncer) cf(ctx context.Context) (domain.CatalogSnapshot, error) {
 	}
 	finished := map[int]time.Time{}
 	for _, ct := range contests.Result {
-		if ct.ID > 0 && ct.ID < 100000 && ct.Phase == "FINISHED" && ct.Start != nil && ct.Duration != nil && *ct.Duration > 0 {
+		if ct.ID > 0 && ct.ID < 100000 && ct.Phase == "FINISHED" && ct.Start != nil && ct.Duration != nil && *ct.Duration > 0 && cfOwnContest(ct.Name) {
 			finished[ct.ID] = time.Unix(*ct.Start+*ct.Duration, 0)
 		}
 	}
@@ -97,6 +99,20 @@ func (s Syncer) cf(ctx context.Context) (domain.CatalogSnapshot, error) {
 }
 
 var standardContest = regexp.MustCompile(`^(abc|arc|agc)[0-9]+$`)
+
+// cfOwnContestRe matches contests run by Codeforces itself: any "Codeforces ...
+// Round" name (including Educational / Global / Beta Round and sponsor-prefixed
+// names such as "Nebius Round 2 (Codeforces Round 1088, Div. 1 + Div. 2)"),
+// plus the New Year rounds. Online mirrors of onsite contests — ICPC, UCUP,
+// Technocup, VK Cup and similar — are left out so the catalog only carries
+// original CF problems.
+var cfOwnContestRe = regexp.MustCompile(`Codeforces.*Round|^Hello \d{4}|^Good Bye \d{4}`)
+
+// Marathon-style rounds maximize score over hours and make no sense as a daily
+// problem, so they are dropped even though they are Codeforces-branded.
+func cfOwnContest(name string) bool {
+	return !strings.Contains(name, "Marathon") && cfOwnContestRe.MatchString(name)
+}
 
 func (s Syncer) ac(ctx context.Context) (domain.CatalogSnapshot, error) {
 	var problems []struct {
