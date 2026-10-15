@@ -35,11 +35,16 @@ LLM_BASE_URL=http://host.docker.internal:11434/v1
 LLM_API_KEY=ollama-local
 LLM_MODEL=deepseek-v4.1-flash:cloud
 LLM_TOKEN_LIMIT_PARAMETER=max_tokens
+LLM_OUTPUT_TOKEN_LIMIT=32768
+LLM_REQUEST_TIMEOUT_SECONDS=120
+LLM_OPERATION_TIMEOUT_SECONDS=300
+WORKER_LEASE_SECONDS=180
 ```
 
 `ollama-local` 是本機相容 API 所需的非空佔位值。
 `host.docker.internal` 在本專案容器內指向 VPS 主機。
 此模型的生成由 VPS Ollama 轉送到 Ollama Cloud，需沿用主機 Ollama 的登入狀態。
+推理會佔用輸出 token 額度；曾觀察到 8,192 token 全部用於推理，答案內容為空且 `finish_reason=length`，因此此部署提高額度與等待時間。此時 Bot 回報輸出被截斷，不保存不完整答案，也不以相同參數自動重試。額度變更會改變生成快取鍵，已有公開貼文仍保留。
 
 ## 檢查並啟動
 
@@ -77,7 +82,7 @@ Forum 若要求 tag，再設定既有 tag ID：
 這台 VPS 已設定每日台北時間 08:00 發布 AtCoder、Codeforces 各一題；
 AtCoder 難度 1500～2100，Codeforces rating 1800～2400。
 「給我題解」提供繁體中文思路、演算法、正確性、複雜度與範例說明，不附完整程式碼。
-提示與題解使用 `||…||` 遮蔽，點擊後才顯示；分段及超長附件也會標示為 spoiler。
+提示與題解只有點擊者可見，使用 Discord 原生 Markdown 顯示標題、粗體、條列、行內代碼與引用區塊，數學式以 Unicode 符號呈現，不使用 spoiler 遮蔽。每次只更新原本的一則私人訊息；長內容放在同一則訊息的 embed 中，超長內容改用私人文字附件。
 題目文字與範例會合併排版，超過 Discord 單則訊息上限才分段，不添加段落編號標頭。
 要立即發布今日題目可執行 `/daily publish`；這會在 Forum 貼文並使用模型生成額度。
 

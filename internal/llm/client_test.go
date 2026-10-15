@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kzzz/atc-cf-bot/internal/config"
+	"github.com/kzzz/atc-cf-bot/internal/domain"
 )
 
 func TestCompletionValidationAndRequest(t *testing.T) {
@@ -44,6 +46,29 @@ func TestCompletionValidationAndRequest(t *testing.T) {
 			_, e := client.Complete(context.Background(), Request{Kind: "hint", Messages: []Message{{Role: "user", Content: "題目"}}})
 			if (e == nil) != tc.ok || calls != 1 {
 				t.Fatalf("result=%v calls=%d", e, calls)
+			}
+		})
+	}
+}
+func TestReasoningBudgetExhaustion(t *testing.T) {
+	for _, content := range []string{`""`, `null`, `"partial answer"`} {
+		t.Run(content, func(t *testing.T) {
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				_, _ = io.WriteString(w, `{"choices":[{"message":{"content":`+content+`,"reasoning":"PRIVATE_REASONING"},"finish_reason":"length"}]}`)
+			}))
+			defer server.Close()
+			cfg := config.Default().LLM
+			cfg.BaseURL = server.URL
+			client := New(cfg, 4096)
+			result, err := client.Complete(context.Background(), Request{Kind: "solution"})
+			var de *domain.Error
+			if !errors.As(err, &de) || de.Code != domain.Truncated {
+				t.Fatalf("expected truncation, got %v", err)
+			}
+			if result.Text != "" || strings.Contains(err.Error(), "PRIVATE_REASONING") || calls != 1 || client.Degraded() {
+				t.Fatalf("truncation leaked content, retried unchanged request, or disabled model: calls=%d", calls)
 			}
 		})
 	}

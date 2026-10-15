@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ type Router struct {
 	Adapter                             *Adapter
 	Store                               *store.Store
 	Generation                          *generation.Service
+	Log                                 *slog.Logger
 	RecoveryMode                        bool
 	Ready                               func() bool
 	ManualGuildLimit, ManualGlobalLimit int
@@ -94,6 +96,7 @@ func (r *Router) Handle(i *discordgo.Interaction) {
 		defer c()
 		text, e := r.dispatch(ctx, i)
 		if e != nil {
+			r.logFailure("dispatch", i, e)
 			text = safeError(e)
 		}
 		if ctx.Err() != nil {
@@ -103,11 +106,26 @@ func (r *Router) Handle(i *discordgo.Interaction) {
 			return
 		}
 		if e == nil && i.Type == discordgo.InteractionMessageComponent {
-			_ = r.Adapter.ReplySpoiler(ctx, i, text)
+			e = r.Adapter.ReplyAnswer(ctx, i, text)
 		} else {
-			_ = r.Adapter.Reply(ctx, i, text)
+			e = r.Adapter.Reply(ctx, i, text)
+		}
+		if e != nil {
+			r.logFailure("reply", i, e)
 		}
 	}()
+}
+
+func (r *Router) logFailure(stage string, i *discordgo.Interaction, err error) {
+	if r.Log == nil {
+		return
+	}
+	code, status := "internal", 0
+	var de *domain.Error
+	if errors.As(err, &de) {
+		code, status = string(de.Code), de.Status
+	}
+	r.Log.Warn("interaction failed", "stage", stage, "interaction_id", i.ID, "code", code, "http_status", status)
 }
 func safeError(e error) string {
 	var de *domain.Error
@@ -121,6 +139,8 @@ func safeError(e error) string {
 			return "尚未完成設定，請由管理員或部署維護者檢查。"
 		case domain.RateLimited:
 			return "請求過於頻繁或佇列已滿，請稍後再試。"
+		case domain.Truncated:
+			return "模型輸出達到長度上限，未能產生完整內容；請稍後重試，若持續發生請聯絡管理員調整生成額度。"
 		case domain.NoCandidate:
 			return "目前沒有符合難度與去重條件的題目。"
 		case domain.Conflict:

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,31 @@ import (
 	"github.com/kzzz/atc-cf-bot/internal/render"
 	"github.com/kzzz/atc-cf-bot/internal/store"
 )
+
+func TestDuplicateInteractionEventsAreAcknowledgedOnce(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		// End at acknowledgement, before dispatch needs a real database.
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	a, _ := New("secret", nil)
+	a.BaseURL = server.URL
+	r := Router{Root: context.Background(), Adapter: a}
+	r.Init()
+	interaction := &discordgo.Interaction{ID: "123456789", Token: "interaction"}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() { defer wg.Done(); r.Handle(interaction) }()
+	}
+	wg.Wait()
+	r.Close()
+	if calls.Load() != 1 {
+		t.Fatalf("duplicate interaction acknowledged %d times", calls.Load())
+	}
+}
 
 func TestOverviewUpdateAcceptsRemovedTrailingNewline(t *testing.T) {
 	for _, tc := range []struct {

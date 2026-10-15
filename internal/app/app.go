@@ -62,7 +62,7 @@ func Run(parent context.Context, c config.Config, recovery bool, log *slog.Logge
 	defer client.HTTP.CloseIdleConnections()
 	coordinator := generation.New(ctx, db, c.LLM.MaxConcurrency, c.LLM.MaxQueue, c.Limits.Waiters, c.Limits.GuildWaiters, c.LLM.OperationDuration())
 	defer func() { cancel(); coordinator.Close() }()
-	gen := &generation.Service{Client: client, Coordinator: coordinator, BlockLimit: c.Limits.TranslationBytes}
+	gen := &generation.Service{Client: client, Coordinator: coordinator, BlockLimit: c.Limits.TranslationBytes, Log: log}
 	var gateway, initialized, degraded atomic.Bool
 	health := Health(ctx, c.HealthAddress, func() bool {
 		if !gateway.Load() || !initialized.Load() || ctx.Err() != nil {
@@ -77,7 +77,7 @@ func Run(parent context.Context, c config.Config, recovery bool, log *slog.Logge
 		defer c()
 		_ = health.Shutdown(clean)
 	}()
-	router := &discord.Router{Root: ctx, Adapter: adapter, Store: db, Generation: gen, RecoveryMode: recovery, ManualGuildLimit: c.Limits.ManualGuildQueue, ManualGlobalLimit: c.Limits.ManualGlobalQueue, Ready: func() bool { return initialized.Load() }}
+	router := &discord.Router{Root: ctx, Adapter: adapter, Store: db, Generation: gen, Log: log, RecoveryMode: recovery, ManualGuildLimit: c.Limits.ManualGuildQueue, ManualGlobalLimit: c.Limits.ManualGlobalQueue, Ready: func() bool { return initialized.Load() }}
 	router.Init()
 	adapter.Session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Ready) { gateway.Store(true) })
 	adapter.Session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) { gateway.Store(true) })

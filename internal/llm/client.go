@@ -145,9 +145,8 @@ func (c *Client) attempt(ctx context.Context, body []byte) (Result, error) {
 		return Result{}, domain.Fail(domain.Unsupported)
 	}
 	choice := r.Choices[0]
-	if choice.Message.Content == nil || strings.TrimSpace(*choice.Message.Content) == "" || nonEmpty(choice.Message.Refusal) || nonEmpty(choice.Message.ToolCalls) {
-		return Result{}, domain.Fail(domain.Unsupported)
-	}
+	// Reasoning models can exhaust the output budget before emitting any
+	// answer text. Classify the finish reason before checking for empty content.
 	if choice.Finish == nil {
 		if !c.Config.AllowMissingFinish {
 			return Result{}, domain.Fail(domain.Unsupported)
@@ -155,6 +154,9 @@ func (c *Client) attempt(ctx context.Context, body []byte) (Result, error) {
 	} else if *choice.Finish == "length" {
 		return Result{}, domain.Fail(domain.Truncated)
 	} else if *choice.Finish != "stop" {
+		return Result{}, domain.Fail(domain.Unsupported)
+	}
+	if choice.Message.Content == nil || strings.TrimSpace(*choice.Message.Content) == "" || nonEmpty(choice.Message.Refusal) || nonEmpty(choice.Message.ToolCalls) {
 		return Result{}, domain.Fail(domain.Unsupported)
 	}
 	return Result{Text: *choice.Message.Content, Usage: r.Usage}, nil

@@ -94,6 +94,25 @@ func TestMarkdownCodeContinuations(t *testing.T) {
 		t.Fatal("unclosed fence accepted")
 	}
 }
+
+func TestLongLaTeXContinuationsPreserveFormula(t *testing.T) {
+	formula := strings.Repeat("\\sum_{i=1}^{N} a_i = S\n", 400)
+	parts, err := SplitMarkdown("```latex\n"+formula+"```", 1800, nil)
+	if err != nil || len(parts) < 2 {
+		t.Fatalf("count=%d error=%v", len(parts), err)
+	}
+	var restored strings.Builder
+	for _, part := range parts {
+		if Units(part) > 1800 || !strings.HasPrefix(part, "```latex\n") || !strings.HasSuffix(strings.TrimSuffix(part, "\n"), "```") {
+			t.Fatalf("broken formula block %q", part)
+		}
+		body := strings.TrimPrefix(part, "```latex\n")
+		restored.WriteString(strings.TrimSuffix(strings.TrimSuffix(body, "\n"), "```"))
+	}
+	if restored.String() != formula {
+		t.Fatal("formula changed during splitting")
+	}
+}
 func TestSamplesComeBeforeExplanation(t *testing.T) {
 	idx := 0
 	s := domain.Statement{Title: "A", URL: "https://atcoder.jp/a", Blocks: []domain.Block{{ID: "a", Text: "Original"}, {ID: "b", Kind: "sample_input", Text: "1\n", SampleIndex: &idx}, {ID: "c", Kind: "sample_output", Text: "2\n", SampleIndex: &idx}, {ID: "d", Kind: "explanation", Text: "Explanation"}}, Samples: []domain.Sample{{Input: "1\n", Output: "2\n"}}}

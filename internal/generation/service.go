@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/kzzz/atc-cf-bot/internal/domain"
@@ -18,6 +19,7 @@ type Service struct {
 	Client      *llm.Client
 	Coordinator *Coordinator
 	BlockLimit  int
+	Log         *slog.Logger
 }
 
 func (s *Service) Generate(ctx context.Context, guild, sid, kind, language string, statement domain.Statement) (json.RawMessage, string, error) {
@@ -30,6 +32,9 @@ func (s *Service) Generate(ctx context.Context, guild, sid, kind, language strin
 	req := llm.Request{Kind: kind, Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}}
 	fp := s.Client.Fingerprint(req, domain.JSONHash(statement), statement.ParserVersion, language)
 	fp["statement_id"] = sid
+	if kind != "translation" {
+		fp["answer_format"] = "discord-markdown-v3"
+	}
 	if kind == "translation" {
 		fp["translation_batch_bytes"] = s.BlockLimit
 		fp["translation_batch_policy"] = "context-v1"
@@ -39,9 +44,12 @@ func (s *Service) Generate(ctx context.Context, guild, sid, kind, language strin
 		if kind != "translation" {
 			r, e := s.Client.Complete(shared, req)
 			if e != nil {
+				s.logFailure("llm", kind, key, e)
 				return nil, e
 			}
+			r.Text = normalizeAnswer(r.Text)
 			if e = validateAnswer(kind, language, r.Text); e != nil {
+				s.logFailure("validation", kind, key, e)
 				return nil, e
 			}
 			return json.Marshal(r)
@@ -71,6 +79,14 @@ func (s *Service) Generate(ctx context.Context, guild, sid, kind, language strin
 		return json.Marshal(t)
 	})
 	return result, key, e
+}
+
+func (s *Service) logFailure(stage, kind, key string, err error) {
+	if s.Log != nil {
+		// LLM and validation errors contain static diagnostics, never responses
+		// or credentials. The fingerprint is safe to correlate with the DB.
+		s.Log.Warn("generation failed", "stage", stage, "kind", kind, "cache_key", key, "error", err)
+	}
 }
 func (s *Service) translate(ctx context.Context, b domain.Block, system, background string, depth int) (string, error) {
 	// Split before a request if the configured byte bound is exceeded; atom tokens

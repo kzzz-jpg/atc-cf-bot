@@ -308,23 +308,33 @@ func (a *Adapter) Defer(ctx context.Context, i *discordgo.Interaction) error {
 	return a.JSON(ctx, "POST", "/interactions/"+i.ID+"/"+i.Token+"/callback", "interaction:"+i.ID, map[string]any{"type": 5, "data": map[string]any{"flags": 64, "allowed_mentions": render.Mentions{Parse: []string{}}}}, nil, false)
 }
 func (a *Adapter) Reply(ctx context.Context, i *discordgo.Interaction, text string) error {
-	return a.reply(ctx, i, text, false)
+	return a.reply(ctx, i, text)
 }
-func (a *Adapter) ReplySpoiler(ctx context.Context, i *discordgo.Interaction, text string) error {
-	return a.reply(ctx, i, text, true)
-}
-func (a *Adapter) reply(ctx context.Context, i *discordgo.Interaction, text string, spoiler bool) error {
-	var parts []string
-	var e error
-	flags := discordgo.MessageFlagsEphemeral
-	if spoiler {
-		parts, e = render.SplitSpoiler(text, 1800)
-		flags |= discordgo.MessageFlagsSuppressEmbeds
-	} else {
-		parts, e = render.SplitMarkdown(text, 1800, nil)
+func (a *Adapter) ReplyAnswer(ctx context.Context, i *discordgo.Interaction, text string) error {
+	// Answers always edit the original private response. Repeated delivery
+	// updates that same message instead of creating duplicate followups.
+	if render.Units(text) <= 2000 {
+		return a.JSON(ctx, "PATCH", "/webhooks/"+i.AppID+"/"+i.Token+"/messages/@original", "webhook:"+i.ID,
+			map[string]any{"content": text, "embeds": []any{}, "flags": discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds, "allowed_mentions": render.Mentions{Parse: []string{}}}, nil, false)
 	}
+	parts, e := render.SplitMarkdown(text, 4096, nil)
+	units := 0
+	var embeds []map[string]string
+	for _, part := range parts {
+		units += render.Units(part)
+		embeds = append(embeds, map[string]string{"description": part})
+	}
+	if e != nil || units > 6000 || len(embeds) > 10 {
+		return a.privateAttachment(ctx, i, text, true)
+	}
+	return a.JSON(ctx, "PATCH", "/webhooks/"+i.AppID+"/"+i.Token+"/messages/@original", "webhook:"+i.ID,
+		map[string]any{"content": "", "embeds": embeds, "flags": discordgo.MessageFlagsEphemeral, "allowed_mentions": render.Mentions{Parse: []string{}}}, nil, false)
+}
+func (a *Adapter) reply(ctx context.Context, i *discordgo.Interaction, text string) error {
+	parts, e := render.SplitMarkdown(text, 1800, nil)
+	flags := discordgo.MessageFlagsEphemeral
 	if e != nil || len(parts) > 20 {
-		return a.privateAttachment(ctx, i, text, spoiler)
+		return a.privateAttachment(ctx, i, text, false)
 	}
 	for n, p := range parts {
 		path := "/webhooks/" + i.AppID + "/" + i.Token
@@ -343,19 +353,17 @@ func (a *Adapter) reply(ctx context.Context, i *discordgo.Interaction, text stri
 func (a *Adapter) PrivateAttachment(ctx context.Context, i *discordgo.Interaction, text string) error {
 	return a.privateAttachment(ctx, i, text, false)
 }
-func (a *Adapter) privateAttachment(ctx context.Context, i *discordgo.Interaction, text string, spoiler bool) error {
+func (a *Adapter) privateAttachment(ctx context.Context, i *discordgo.Interaction, text string, suppressEmbeds bool) error {
 	var data bytes.Buffer
 	mw := multipart.NewWriter(&data)
 	field, _ := mw.CreateFormField("payload_json")
 	filename := "answer.txt"
 	content := "完整私人回覆請見附件（AI 產生）。"
 	flags := discordgo.MessageFlagsEphemeral
-	if spoiler {
-		filename = "SPOILER_" + filename
-		content = "||" + content + "||"
+	if suppressEmbeds {
 		flags |= discordgo.MessageFlagsSuppressEmbeds
 	}
-	payload := map[string]any{"content": content, "flags": flags, "allowed_mentions": render.Mentions{Parse: []string{}}, "attachments": []any{map[string]any{"id": "0", "filename": filename}}}
+	payload := map[string]any{"content": content, "embeds": []any{}, "flags": flags, "allowed_mentions": render.Mentions{Parse: []string{}}, "attachments": []any{map[string]any{"id": "0", "filename": filename}}}
 	raw, _ := json.Marshal(payload)
 	_, _ = field.Write(raw)
 	file, e := mw.CreateFormFile("files[0]", filename)
