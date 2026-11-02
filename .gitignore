@@ -3,3 +3,9 @@ config.yaml
 /bin/
 /coverage.out
 *.log
+
+# Development process files
+spec.md
+agent.md
+notes.md
+plan.md
