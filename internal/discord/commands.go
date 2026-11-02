@@ -20,6 +20,17 @@ func Commands() []*discordgo.ApplicationCommand {
 			&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "min_difficulty", Description: "最低難度，需指定來源"},
 			&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "max_difficulty", Description: "最高難度，需指定來源"})}},
 		{Name: "daily", Description: "每日題目", Options: []*discordgo.ApplicationCommandOption{sub("show", "查看今日狀態"), sub("publish", "執行或恢復今日每日題目（管理員）")}},
+		{Name: "progress", Description: "解題記錄與統計", Options: []*discordgo.ApplicationCommandOption{
+			sub("me", "查看自己的解題磁磚圖與統計",
+				&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "weeks", Description: "顯示週數（1–26，預設 8）"}),
+			sub("user", "查看某位成員的解題統計",
+				&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionUser, Name: "user", Description: "成員", Required: true},
+				&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "weeks", Description: "顯示週數（1–26，預設 8）"}),
+			sub("backlog", "查看尚未回報的題目並補記錄",
+				&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "days", Description: "回看天數（1–366，預設 30）"}),
+			sub("leaderboard", "解題排行榜",
+				&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionString, Name: "period", Description: "統計期間", Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "本週", Value: "week"}, {Name: "本月", Value: "month"}, {Name: "全部", Value: "all"}}})}},
 		{Name: "config", Description: "管理設定", DefaultMemberPermissions: &admin, Options: []*discordgo.ApplicationCommandOption{sub("show", "查看設定"), sub("set", "更新設定",
 			&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionString, Name: "key", Description: "設定欄位", Required: true},
 			&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionString, Name: "value", Description: "設定值，清單使用 JSON array", Required: true})}},

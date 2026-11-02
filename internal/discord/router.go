@@ -94,10 +94,11 @@ func (r *Router) Handle(i *discordgo.Interaction) {
 		defer func() { <-r.gate }()
 		ctx, c := context.WithTimeout(r.Root, 180*time.Second)
 		defer c()
-		text, e := r.dispatch(ctx, i)
+		text, handled, e := r.dispatch(ctx, i)
 		if e != nil {
 			r.logFailure("dispatch", i, e)
 			text = safeError(e)
+			handled = false
 		}
 		if ctx.Err() != nil {
 			clean, cc := context.WithTimeout(r.Root, 5*time.Second)
@@ -105,7 +106,10 @@ func (r *Router) Handle(i *discordgo.Interaction) {
 			cc()
 			return
 		}
-		if e == nil && i.Type == discordgo.InteractionMessageComponent {
+		if e == nil && handled {
+			return
+		}
+		if i.Type == discordgo.InteractionMessageComponent {
 			e = r.Adapter.ReplyAnswer(ctx, i, text)
 		} else {
 			e = r.Adapter.Reply(ctx, i, text)
@@ -151,39 +155,39 @@ func safeError(e error) string {
 	}
 	return "服務暫時無法完成，請稍後重試。"
 }
-func (r *Router) dispatch(ctx context.Context, i *discordgo.Interaction) (string, error) {
+func (r *Router) dispatch(ctx context.Context, i *discordgo.Interaction) (string, bool, error) {
 	if i.GuildID == "" || i.Member == nil || i.Member.User == nil {
-		return "", domain.Fail(domain.Unauthorized)
+		return "", false, domain.Fail(domain.Unauthorized)
 	}
 	user := i.Member.User.ID
 	if e := r.Store.EnsureGuild(ctx, i.GuildID); e != nil {
-		return "", e
+		return "", false, e
 	}
 	cfg, e := r.Store.Config(ctx, i.GuildID)
 	if e != nil {
-		return "", e
+		return "", false, e
 	}
 	if e = r.Adapter.Authorize(ctx, i.GuildID, user, i.ChannelID, false, nil); e != nil {
-		return "", e
+		return "", false, e
 	}
 	if i.Type == discordgo.InteractionMessageComponent {
 		return r.button(ctx, i, cfg)
 	}
 	if i.Type != discordgo.InteractionApplicationCommand {
-		return "", domain.Fail(domain.Invalid)
+		return "", false, domain.Fail(domain.Invalid)
 	}
 	data := i.ApplicationCommandData()
 	if data.Name == "help" {
-		return "/problem random：在今日討論串加題\n/daily show：查看今日狀態\n/daily publish：管理員補齊每日題目\n/config show、set：管理員查看／修改設定\n題目結尾按鈕：原站、私人提示、私人解答。AI 內容請與原站核對。", nil
+		return "/problem random：在今日討論串加題\n/daily show：查看今日狀態\n/daily publish：管理員補齊每日題目\n/progress me・user・backlog・leaderboard：解題記錄、未寫清單與排行榜\n/config show、set：管理員查看／修改設定\n題目結尾按鈕：原站、私人提示、私人解答、回報解題。AI 內容請與原站核對。", false, nil
 	}
 	if len(data.Options) != 1 {
-		return "", domain.Fail(domain.Invalid)
+		return "", false, domain.Fail(domain.Invalid)
 	}
 	sub := data.Options[0]
 	admin := data.Name == "config" || (data.Name == "daily" && sub.Name == "publish")
 	if admin {
 		if e = r.Adapter.Authorize(ctx, i.GuildID, user, i.ChannelID, true, nil); e != nil {
-			return "", e
+			return "", false, e
 		}
 	}
 	options := map[string]*discordgo.ApplicationCommandInteractionDataOption{}
@@ -191,53 +195,55 @@ func (r *Router) dispatch(ctx context.Context, i *discordgo.Interaction) (string
 		options[o.Name] = o
 	}
 	switch data.Name + " " + sub.Name {
+	case "progress me", "progress user", "progress backlog", "progress leaderboard":
+		return r.progressCommand(ctx, i, cfg, sub.Name, options)
 	case "config show":
 		raw, _ := json.MarshalIndent(cfg.Settings, "", "  ")
-		return fmt.Sprintf("設定版本 %d\n```json\n%s\n```\nDiscord Token：已設定；LLM API key：已設定。", cfg.Version, raw), nil
+		return fmt.Sprintf("設定版本 %d\n```json\n%s\n```\nDiscord Token：已設定；LLM API key：已設定。", cfg.Version, raw), false, nil
 	case "config set":
 		key, value := options["key"], options["value"]
 		if key == nil || value == nil {
-			return "", domain.Fail(domain.Invalid)
+			return "", false, domain.Fail(domain.Invalid)
 		}
 		next, e := cfg.Settings.Set(key.StringValue(), value.StringValue())
 		if e != nil {
-			return "", e
+			return "", false, e
 		}
 		if e = r.validateSettings(ctx, i.GuildID, next); e != nil {
-			return "", e
+			return "", false, e
 		}
 		pending, e := r.Store.UpdateConfig(ctx, i.GuildID, cfg.Version, next)
 		if e != nil {
-			return "", e
+			return "", false, e
 		}
 		timing := "立即生效；已有每日紀錄的公開設定於下一週期生效"
 		if pending {
 			timing = "時區於舊時區當日結束後生效"
 		}
 		raw, _ := json.Marshal(next)
-		return fmt.Sprintf("設定已保存（版本 %d）。%s。\n```json\n%s\n```", cfg.Version+1, timing, raw), nil
+		return fmt.Sprintf("設定已保存（版本 %d）。%s。\n```json\n%s\n```", cfg.Version+1, timing, raw), false, nil
 	case "daily show":
 		d, e := r.Store.Today(ctx, i.GuildID)
 		if e == pgx.ErrNoRows {
-			return "今日尚未建立貼文。", nil
+			return "今日尚未建立貼文。", false, nil
 		}
 		if e != nil {
-			return "", e
+			return "", false, e
 		}
-		return dailyText(d), nil
+		return dailyText(d), false, nil
 	case "daily publish", "problem random":
 		if r.Ready != nil && !r.Ready() {
-			return "服務正在初始化，請稍後重試。", nil
+			return "服務正在初始化，請稍後重試。", false, nil
 		}
 		if r.RecoveryMode {
-			return "備份恢復模式中，暫停接受新公開工作。", nil
+			return "備份恢復模式中，暫停接受新公開工作。", false, nil
 		}
 		manual := data.Name == "problem"
 		if e = r.Adapter.CheckForum(ctx, i.GuildID, cfg.Settings); e != nil {
-			return "", e
+			return "", false, e
 		}
 		if e = r.Adapter.Authorize(ctx, i.GuildID, user, cfg.Settings.ForumChannelID, !manual, cfg.Settings.ManualRoleIDs); e != nil {
-			return "", e
+			return "", false, e
 		}
 		req := store.AcceptRequest{GuildID: i.GuildID, UserID: user, InteractionID: i.ID, Manual: manual, AllowResume: !manual, GuildLimit: r.ManualGuildLimit, GlobalLimit: r.ManualGlobalLimit}
 		if src := options["source"]; src != nil {
@@ -256,7 +262,7 @@ func (r *Router) dispatch(ctx context.Context, i *discordgo.Interaction) (string
 			var ok bool
 			finish, ok = r.beginCooldown(i.GuildID, user, "manual", cfg.Settings.ManualCooldown)
 			if !ok {
-				return "", domain.Fail(domain.RateLimited)
+				return "", false, domain.Fail(domain.RateLimited)
 			}
 		}
 		job, e := r.Store.Accept(ctx, req)
@@ -264,12 +270,12 @@ func (r *Router) dispatch(ctx context.Context, i *discordgo.Interaction) (string
 			finish(e == nil)
 		}
 		if e != nil {
-			return "", e
+			return "", false, e
 		}
 
-		return "任務已接受（" + job.Status + "）。請用 /daily show 查看完成狀態。", nil
+		return "任務已接受（" + job.Status + "）。請用 /daily show 查看完成狀態。", false, nil
 	}
-	return "", domain.Fail(domain.Invalid)
+	return "", false, domain.Fail(domain.Invalid)
 }
 func dailyText(d store.Daily) string {
 	link := "尚未建立討論串"
@@ -287,41 +293,47 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 
 func ParseButton(id string) (string, string, error) {
 	p := strings.Split(id, ":")
-	if len(p) != 3 || p[0] != "v1" || (p[1] != "hint" && p[1] != "solution") || !uuidPattern.MatchString(p[2]) {
+	if len(p) != 3 || p[0] != "v1" || (p[1] != "hint" && p[1] != "solution" && p[1] != "solved") || !uuidPattern.MatchString(p[2]) {
 		return "", "", domain.Fail(domain.Invalid)
 	}
 	return p[1], p[2], nil
 }
-func (r *Router) button(ctx context.Context, i *discordgo.Interaction, cfg store.GuildConfig) (string, error) {
+func (r *Router) button(ctx context.Context, i *discordgo.Interaction, cfg store.GuildConfig) (string, bool, error) {
+	if strings.HasPrefix(i.MessageComponentData().CustomID, "v1:backlog:") {
+		return r.backlogComponent(ctx, i, cfg)
+	}
 	kind, pub, e := ParseButton(i.MessageComponentData().CustomID)
 	if e != nil {
-		return "", e
+		return "", false, e
 	}
 	if i.Message == nil || i.Message.Author == nil || i.Message.Author.ID != r.Adapter.BotID {
-		return "", domain.Fail(domain.Unauthorized)
+		return "", false, domain.Fail(domain.Unauthorized)
+	}
+	if kind == "solved" {
+		return r.solveToggle(ctx, i, cfg, pub)
 	}
 	sid, e := r.Store.ButtonStatement(ctx, i.GuildID, i.ChannelID, i.Message.ID, pub)
 	if e != nil {
-		return "", e
+		return "", false, e
 	}
 	statement, e := r.Store.Statement(ctx, sid)
 	if e != nil {
-		return "", e
+		return "", false, e
 	}
 	finish, ok := r.beginCooldown(i.GuildID, i.Member.User.ID, "generation", cfg.Settings.GenerationCooldown)
 	if !ok {
-		return "", domain.Fail(domain.RateLimited)
+		return "", false, domain.Fail(domain.RateLimited)
 	}
 	raw, _, e := r.Generation.Generate(ctx, i.GuildID, sid, kind, cfg.Settings.SolutionLanguage, statement)
 	finish(e == nil || !isRateLimited(e))
 	if e != nil {
-		return "", e
+		return "", false, e
 	}
 	var result llm.Result
 	if json.Unmarshal(raw, &result) != nil {
-		return "", domain.Fail(domain.Unsupported)
+		return "", false, domain.Fail(domain.Unsupported)
 	}
-	return result.Text, nil
+	return result.Text, false, nil
 }
 func isRateLimited(e error) bool {
 	var de *domain.Error

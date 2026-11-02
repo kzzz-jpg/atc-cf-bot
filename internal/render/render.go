@@ -11,7 +11,7 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-const Version = "discord-v2"
+const Version = "discord-v3"
 
 func Units(s string) int {
 	n := 0
@@ -24,12 +24,24 @@ func Units(s string) int {
 	return n
 }
 
+// Button doubles as any message component: Type 2 renders a button, Type 3 a
+// string select menu (Label unused, Options required).
 type Button struct {
-	Type     int    `json:"type"`
-	Style    int    `json:"style"`
-	Label    string `json:"label"`
-	URL      string `json:"url,omitempty"`
-	CustomID string `json:"custom_id,omitempty"`
+	Type        int            `json:"type"`
+	Style       int            `json:"style,omitempty"`
+	Label       string         `json:"label,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	CustomID    string         `json:"custom_id,omitempty"`
+	Placeholder string         `json:"placeholder,omitempty"`
+	Disabled    bool           `json:"disabled,omitempty"`
+	MinValues   *int           `json:"min_values,omitempty"`
+	MaxValues   *int           `json:"max_values,omitempty"`
+	Options     []SelectOption `json:"options,omitempty"`
+}
+type SelectOption struct {
+	Label       string `json:"label"`
+	Value       string `json:"value"`
+	Description string `json:"description,omitempty"`
 }
 type Row struct {
 	Type       int      `json:"type"`
@@ -48,7 +60,10 @@ type Image struct {
 	URL string `json:"url"`
 }
 type Embed struct {
-	Image *Image `json:"image,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Color       int    `json:"color,omitempty"`
+	Image       *Image `json:"image,omitempty"`
 }
 type Payload struct {
 	Content         string       `json:"content"`
@@ -266,6 +281,6 @@ func Problem(s domain.Statement, t domain.Translation, ref domain.ProblemRef, pu
 			return nil, domain.Fail(domain.Unsupported)
 		}
 	}
-	result[len(result)-1].Components = []Row{{Type: 1, Components: []Button{{Type: 2, Style: 5, Label: "前往題目", URL: s.URL}, {Type: 2, Style: 1, Label: "給我提示", CustomID: "v1:hint:" + pubID}, {Type: 2, Style: 2, Label: "給我題解", CustomID: "v1:solution:" + pubID}}}}
+	result[len(result)-1].Components = []Row{{Type: 1, Components: []Button{{Type: 2, Style: 5, Label: "前往題目", URL: s.URL}, {Type: 2, Style: 1, Label: "給我提示", CustomID: "v1:hint:" + pubID}, {Type: 2, Style: 2, Label: "給我題解", CustomID: "v1:solution:" + pubID}, {Type: 2, Style: 3, Label: "回報解題 ✅", CustomID: "v1:solved:" + pubID}}}}
 	return result, nil
 }

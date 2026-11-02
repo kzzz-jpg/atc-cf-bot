@@ -1,6 +1,6 @@
 # AtCoder／Codeforces 每日題目 Bot
 
-Go + PostgreSQL 的 Discord Forum Bot。每日預設發布 AtCoder、Codeforces 各一題，在同一討論串呈現完整繁體中文翻譯與原始範例。題目結尾提供原站、私人提示、私人解答按鈕。
+Go + PostgreSQL 的 Discord Forum Bot。每日預設發布 AtCoder、Codeforces 各一題，在同一討論串呈現完整繁體中文翻譯與原始範例。題目結尾提供原站、私人提示、私人解答與回報解題按鈕。
 
 題意、輸入輸出、限制及範例會合併成完整正文；超過 Discord 單則 2,000 UTF-16 units 限制才分段，不附日期／題號／段落編號的分段標頭。必要圖片盡量併入正文訊息。
 
@@ -67,8 +67,14 @@ Forum 要求 tag 時必須使用該 Forum 的既有 tag ID。沒有設定 Forum 
 | `/problem random [source] [min_difficulty] [max_difficulty]` | 一般成員／指定角色 | 當日加一題，不扣每日配額。難度覆寫需指定單一來源且在管理員區間內。 |
 | `/daily show` | 一般成員 | 今日貼文連結與狀態。 |
 | `/daily publish` | 管理員 | 接受或恢復當日每日工作，沿用相同貼文與名額。 |
+| `/progress me [weeks]` | 一般成員 | 私人回覆：emoji 磁磚圖（每列一週，⬜🟩🟨🟧🟥 表示當日題數）與統計（總題數、連續天數、本週／上週、平台佔比）。 |
+| `/progress user @成員 [weeks]` | 一般成員 | 在頻道公開回覆該成員的解題統計。 |
+| `/progress backlog [days]` | 一般成員 | 私人回覆：列出最近天數內尚未回報的已發布題目（含討論串訊息連結），並可直接多選補記錄。 |
+| `/progress leaderboard [period]` | 一般成員 | 在頻道公開回覆本週／本月／全部的解題排行榜（前 10 名）。 |
 | `/config show`、`/config set key value` | 管理員 | 查看或更新允許的設定，不回傳密鑰。 |
 | `/help` | 一般成員 | 指令說明。 |
+
+解題記錄由每則題目訊息結尾的「回報解題 ✅」按鈕寫入，再按一次取消；以 `(伺服器, 使用者, 題目)` 去重，`/problem random` 加題與歷史題目都可比照記錄。記錄日期以伺服器設定的時區切日，同一題重複出現時只計一次。統計圖表僅呈現自助回報，不驗證原站提交。
 
 設定 key 見 [config 型別](internal/domain/domain.go) 與 [規格第 8 節](spec.md)。角色、tag 清單使用 JSON array；權重是正整數。公開設定於每日紀錄建立時凍結，既有日期的題數、來源、難度、Forum 不因設定更新而改變。時區於舊時區當日結束後生效；語言、角色及冷卻按新互動讀取最新值。
 

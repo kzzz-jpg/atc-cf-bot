@@ -16,7 +16,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-const SchemaVersion int64 = 2
+const SchemaVersion int64 = 3
 
 type Store struct {
 	Pool         *pgxpool.Pool
@@ -72,13 +72,13 @@ func (s *Store) CheckSchema(ctx context.Context) error {
 	if e != nil || !applied || v != SchemaVersion {
 		return domain.Fail(domain.Configuration)
 	}
-	tables := []string{"guild_configs", "guild_runtime", "catalog_snapshots", "catalog_heads", "problems", "catalog_entries", "statement_versions", "statement_assets", "statement_asset_links", "source_rejections", "generation_entries", "daily_publications", "problem_publications", "problem_reservations", "posting_jobs", "outbound_operations", "reconciliation_decisions", "interaction_receipts", "goose_db_version"}
+	tables := []string{"guild_configs", "guild_runtime", "catalog_snapshots", "catalog_heads", "problems", "catalog_entries", "statement_versions", "statement_assets", "statement_asset_links", "source_rejections", "generation_entries", "daily_publications", "problem_publications", "problem_reservations", "posting_jobs", "outbound_operations", "reconciliation_decisions", "interaction_receipts", "user_solves", "goose_db_version"}
 	var n int
 	e = s.Pool.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=ANY($1)", tables).Scan(&n)
 	if e != nil || n != len(tables) {
 		return domain.Fail(domain.Configuration)
 	}
-	required := map[string][]string{"guild_configs": {"guild_id", "version", "settings", "pending_schedule", "pending_effective_at"}, "guild_runtime": {"guild_id", "resume_job_id", "lease_owner", "lease_until", "lease_epoch", "block_reason"}, "posting_jobs": {"id", "guild_id", "daily_id", "publication_id", "deadline_at", "dedup_key", "lease_epoch", "auto_retry_count"}, "problem_publications": {"id", "guild_id", "daily_id", "problem_id", "statement_id", "generation_key", "candidate_attempts", "attempted_problem_ids", "first_published_at", "completed_at"}, "outbound_operations": {"id", "daily_id", "publication_id", "payload", "payload_hash", "expected_before_hash", "renderer_version", "discord_id", "result", "send_started_at"}, "statement_versions": {"id", "problem_id", "ast", "content_hash", "parser_version"}, "daily_publications": {"id", "guild_id", "local_date", "ends_at", "config_snapshot", "target_count", "thread_id", "starter_message_id"}}
+	required := map[string][]string{"guild_configs": {"guild_id", "version", "settings", "pending_schedule", "pending_effective_at"}, "guild_runtime": {"guild_id", "resume_job_id", "lease_owner", "lease_until", "lease_epoch", "block_reason"}, "posting_jobs": {"id", "guild_id", "daily_id", "publication_id", "deadline_at", "dedup_key", "lease_epoch", "auto_retry_count"}, "problem_publications": {"id", "guild_id", "daily_id", "problem_id", "statement_id", "generation_key", "candidate_attempts", "attempted_problem_ids", "first_published_at", "completed_at"}, "user_solves": {"guild_id", "user_id", "problem_id", "publication_id", "solved_at", "solved_on", "source"}, "outbound_operations": {"id", "daily_id", "publication_id", "payload", "payload_hash", "expected_before_hash", "renderer_version", "discord_id", "result", "send_started_at"}, "statement_versions": {"id", "problem_id", "ast", "content_hash", "parser_version"}, "daily_publications": {"id", "guild_id", "local_date", "ends_at", "config_snapshot", "target_count", "thread_id", "starter_message_id"}}
 	var tableNames, columnNames []string
 	for table, columns := range required {
 		for _, column := range columns {

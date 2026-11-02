@@ -72,7 +72,8 @@ func TestPayloadLimitAndButtons(t *testing.T) {
 			t.Fatal("unsafe payload")
 		}
 	}
-	if len(ps[len(ps)-1].Components[0].Components) != 3 {
+	buttons := ps[len(ps)-1].Components[0].Components
+	if len(buttons) != 4 || !strings.HasPrefix(buttons[3].CustomID, "v1:solved:") || buttons[3].Style != 3 {
 		t.Fatal("missing buttons")
 	}
 	if _, e = Problem(s, tr, domain.ProblemRef{}, domain.NewID(), "2026-10-08", "題目 1", 1); e == nil {
@@ -155,7 +156,7 @@ func TestShortProblemCombinesSectionsAndSamples(t *testing.T) {
 			t.Fatalf("missing original section/sample %q", expected)
 		}
 	}
-	if len(payloads[0].Components) != 1 || len(payloads[0].Components[0].Components) != 3 {
+	if len(payloads[0].Components) != 1 || len(payloads[0].Components[0].Components) != 4 {
 		t.Fatal("missing final buttons")
 	}
 }

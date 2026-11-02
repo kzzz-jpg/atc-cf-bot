@@ -330,6 +330,70 @@ func (a *Adapter) ReplyAnswer(ctx context.Context, i *discordgo.Interaction, tex
 	return a.JSON(ctx, "PATCH", "/webhooks/"+i.AppID+"/"+i.Token+"/messages/@original", "webhook:"+i.ID,
 		map[string]any{"content": "", "embeds": embeds, "flags": discordgo.MessageFlagsEphemeral, "allowed_mentions": render.Mentions{Parse: []string{}}}, nil, false)
 }
+
+// RichReply delivers embeds and components. Public replies resolve the deferred
+// ephemeral original with a short note, then post the payload as a visible
+// followup in the channel.
+type RichReply struct {
+	Content    string
+	Embeds     []render.Embed
+	Components []render.Row
+	Public     bool
+}
+
+func (a *Adapter) ReplyRich(ctx context.Context, i *discordgo.Interaction, reply RichReply) error {
+	if len(reply.Embeds) > 10 || len(reply.Components) > 5 {
+		return domain.Fail(domain.Invalid)
+	}
+	total := render.Units(reply.Content)
+	for _, e := range reply.Embeds {
+		if render.Units(e.Description) > 4096 || render.Units(e.Title) > 256 {
+			return domain.Fail(domain.Invalid)
+		}
+		total += render.Units(e.Description) + render.Units(e.Title)
+	}
+	if total > 6000 {
+		return domain.Fail(domain.Invalid)
+	}
+	for _, row := range reply.Components {
+		if len(row.Components) > 5 {
+			return domain.Fail(domain.Invalid)
+		}
+		for _, c := range row.Components {
+			if len(c.Options) > 25 || render.Units(c.Label) > 100 || render.Units(c.Placeholder) > 100 {
+				return domain.Fail(domain.Invalid)
+			}
+			for _, o := range c.Options {
+				if render.Units(o.Label) > 100 || render.Units(o.Description) > 100 {
+					return domain.Fail(domain.Invalid)
+				}
+			}
+		}
+	}
+	if reply.Public {
+		if e := a.JSON(ctx, "PATCH", "/webhooks/"+i.AppID+"/"+i.Token+"/messages/@original", "webhook:"+i.ID,
+			map[string]any{"content": "已在頻道回覆。", "embeds": []any{}, "components": []any{}, "flags": discordgo.MessageFlagsEphemeral, "allowed_mentions": render.Mentions{Parse: []string{}}}, nil, false); e != nil {
+			return e
+		}
+		return a.JSON(ctx, "POST", "/webhooks/"+i.AppID+"/"+i.Token, "webhook:"+i.ID,
+			replyWire(reply, 0), nil, false)
+	}
+	return a.JSON(ctx, "PATCH", "/webhooks/"+i.AppID+"/"+i.Token+"/messages/@original", "webhook:"+i.ID,
+		replyWire(reply, discordgo.MessageFlagsEphemeral), nil, false)
+}
+
+// replyWire assembles the interaction response body; a nil component list is
+// omitted rather than sent as JSON null, and flags 0 keeps followups public.
+func replyWire(reply RichReply, flags discordgo.MessageFlags) map[string]any {
+	payload := map[string]any{"content": reply.Content, "embeds": reply.Embeds, "allowed_mentions": render.Mentions{Parse: []string{}}}
+	if reply.Components != nil {
+		payload["components"] = reply.Components
+	}
+	if flags != 0 {
+		payload["flags"] = flags
+	}
+	return payload
+}
 func (a *Adapter) reply(ctx context.Context, i *discordgo.Interaction, text string) error {
 	parts, e := render.SplitMarkdown(text, 1800, nil)
 	flags := discordgo.MessageFlagsEphemeral
