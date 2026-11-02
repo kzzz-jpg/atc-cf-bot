@@ -30,16 +30,21 @@ type Result struct {
 	Text  string          `json:"text"`
 	Usage json.RawMessage `json:"usage,omitempty"`
 }
+// disabledTTL bounds how long an authorization or model error pauses work. The
+// daily posting deadline is 30 minutes, so a failing provider blocks the rest
+// of that run but a manual retry or the next scheduled run tries again.
+const disabledTTL = 30 * time.Minute
+
 type Client struct {
 	Config      config.LLM
 	HTTP        *http.Client
 	MaxResponse int64
 	mu          sync.Mutex
-	disabled    map[string]bool
+	disabled    map[string]time.Time
 }
 
 func New(c config.LLM, maxResponse int64) *Client {
-	return &Client{Config: c, HTTP: &http.Client{Timeout: time.Duration(c.RequestTimeout) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, MaxResponse: maxResponse, disabled: map[string]bool{}}
+	return &Client{Config: c, HTTP: &http.Client{Timeout: time.Duration(c.RequestTimeout) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, MaxResponse: maxResponse, disabled: map[string]time.Time{}}
 }
 func (c *Client) Fingerprint(req Request, statementHash, parser, language string) map[string]any {
 	// nil temperature is represented explicitly; no credential enters this map.
@@ -48,7 +53,7 @@ func (c *Client) Fingerprint(req Request, statementHash, parser, language string
 func (c *Client) Complete(ctx context.Context, req Request) (Result, error) {
 	model := c.Config.ModelFor(req.Kind)
 	c.mu.Lock()
-	disabled := c.disabled["*"] || c.disabled[model]
+	disabled := c.disabledActiveLocked(model)
 	c.mu.Unlock()
 	if disabled {
 		return Result{}, domain.Fail(domain.Configuration)
@@ -79,7 +84,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (Result, error) {
 			if de.Status == 401 || de.Status == 403 {
 				key = "*"
 			}
-			c.disabled[key] = true
+			c.disabled[key] = time.Now().Add(disabledTTL)
 			c.mu.Unlock()
 			return Result{}, de
 		}
@@ -246,4 +251,23 @@ func (c *Client) CheckConnectivity(ctx context.Context) error {
 	}
 	return nil
 }
-func (c *Client) Degraded() bool { c.mu.Lock(); defer c.mu.Unlock(); return len(c.disabled) > 0 }
+// disabledActiveLocked reports whether an unexpired entry covers the model and
+// prunes entries whose TTL has passed. c.mu must be held.
+func (c *Client) disabledActiveLocked(model string) bool {
+	now := time.Now()
+	for key, expiry := range c.disabled {
+		if !now.Before(expiry) {
+			delete(c.disabled, key)
+			continue
+		}
+		if key == "*" || key == model {
+			return true
+		}
+	}
+	return false
+}
+func (c *Client) Degraded() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.disabledActiveLocked("")
+}

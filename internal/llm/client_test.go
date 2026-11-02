@@ -107,6 +107,38 @@ func TestRetryAndDisable(t *testing.T) {
 		})
 	}
 }
+func TestDisabledPauseExpires(t *testing.T) {
+	var count atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if count.Add(1) == 1 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, "SECRET_PROVIDER_BODY")
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"recovered"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	cfg := config.Default().LLM
+	cfg.BaseURL = server.URL
+	client := New(cfg, 1024)
+	if _, e := client.Complete(context.Background(), Request{Kind: "hint"}); e == nil {
+		t.Fatal("403 accepted")
+	}
+	if _, e := client.Complete(context.Background(), Request{Kind: "hint"}); e == nil || count.Load() != 1 {
+		t.Fatal("pause not enforced")
+	}
+	if !client.Degraded() {
+		t.Fatal("pause not reported as degraded")
+	}
+	client.mu.Lock()
+	client.disabled["*"] = time.Now().Add(-time.Second)
+	client.mu.Unlock()
+	result, e := client.Complete(context.Background(), Request{Kind: "hint"})
+	if e != nil || result.Text != "recovered" || count.Load() != 2 || client.Degraded() {
+		t.Fatal("expired pause blocked recovery", e)
+	}
+}
+
 func TestRedirectAndCancelledBackoff(t *testing.T) {
 	var leaked atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Store(true) }))
